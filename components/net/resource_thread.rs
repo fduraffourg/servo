@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+
 //! A thread that takes a URL and streams back the binary data.
+extern crate mio;
+
 use about_loader;
 use chrome_loader;
 use connector::{Connector, create_http_connector};
@@ -195,19 +198,48 @@ pub fn new_core_resource_thread(user_agent: String,
             user_agent, devtools_chan, profiler_chan
         );
 
+        let (public_resource_group, private_resource_group) = create_resource_groups();
+
+        let public = ResourceManager {
+            control_sender: public_setup_chan_clone,
+            receiver: public_setup_port,
+            resource_group: public_resource_group,
+        };
+
+        let private = ResourceManager {
+            control_sender: private_setup_chan_clone,
+            receiver: private_setup_port,
+            resource_group: private_resource_group,
+        };
+
         let mut channel_manager = ResourceChannelManager {
             resource_manager: resource_manager,
+            public: public,
+            private: private,
         };
-        channel_manager.start(public_setup_chan_clone,
-                              private_setup_chan_clone,
-                              public_setup_port,
-                              private_setup_port);
+        // channel_manager.start(public_setup_chan_clone,
+        //                       private_setup_chan_clone,
+        //                       public_setup_port,
+        //                       private_setup_port);
+
+        let mut event_loop = mio::EventLoop::new().expect("Unable to create MIO event loop");
+        //let fd_private_receiver = private_setup_port.os_receiver.consume_fd();
+        event_loop.timeout_ms((), 100);
+        event_loop.run(&mut channel_manager);
     });
     (public_setup_chan, private_setup_chan)
 }
 
 struct ResourceChannelManager {
     resource_manager: CoreResourceManager,
+    public: ResourceManager,
+    private: ResourceManager
+}
+
+struct ResourceManager {
+    control_sender: CoreResourceThread,
+    receiver: IpcReceiver<CoreResourceMsg>,
+    resource_group: ResourceGroup,
 }
 
 fn create_resource_groups() -> (ResourceGroup, ResourceGroup) {
@@ -234,81 +266,94 @@ fn create_resource_groups() -> (ResourceGroup, ResourceGroup) {
     (resource_group, private_resource_group)
 }
 
-impl ResourceChannelManager {
-    #[allow(unsafe_code)]
-    fn start(&mut self,
-             public_control_sender: CoreResourceThread,
-             private_control_sender: CoreResourceThread,
-             public_receiver: IpcReceiver<CoreResourceMsg>,
-             private_receiver: IpcReceiver<CoreResourceMsg>) {
-        let (public_resource_group, private_resource_group) = create_resource_groups();
+impl mio::Handler for ResourceChannelManager {
+    type Timeout = ();
+    type Message = ();
 
-        let mut rx_set = IpcReceiverSet::new().unwrap();
-        let private_id = rx_set.add(private_receiver).unwrap();
-        let public_id = rx_set.add(public_receiver).unwrap();
-
-        loop {
-            for (id, data) in rx_set.select().unwrap().into_iter().map(|m| m.unwrap()) {
-                let (group, sender) = if id == private_id {
-                    (&private_resource_group, &private_control_sender)
-                } else {
-                    assert_eq!(id, public_id);
-                    (&public_resource_group, &public_control_sender)
-                };
-                if let Ok(msg) = data.to() {
-                    if !self.process_msg(msg, group, &sender) {
-                        break;
-                    }
-                }
-            }
-        }
+    fn ready(&mut self, event_loop: &mut mio::EventLoop<ResourceChannelManager>, token: mio::Token, events: mio::EventSet) {
+        println!("MIO ready for new event");
     }
 
+    fn timeout(&mut self, event_loop: &mut mio::EventLoop<ResourceChannelManager>, timeout: ()) {
+        println!("MIO Timeout");
+        // Is a new message arrived on public receiver?
+        loop {
+            match self.public.receiver.try_recv() {
+                Ok(msg) => {
+                    println!("New public message received");
+                    if !self.private.process_msg(msg, &mut self.resource_manager) {
+                        println!("Shutdown the event loop");
+                        event_loop.shutdown()
+                    }
+                }
+                _ => { break; }
+            }
+        }
+
+        // Is a new message arrived on private receiver?
+        loop {
+            match self.private.receiver.try_recv() {
+                Ok(msg) => {
+                    println!("New private message received");
+                    if !self.private.process_msg(msg, &mut self.resource_manager) {
+                        println!("Shutdown the event loop");
+                        event_loop.shutdown()
+                    }
+                }
+                _ => { break; }
+            }
+        }
+
+        // Reschedule the timeout
+        event_loop.timeout_ms((), 100);
+    }
+}
+
+impl ResourceManager {
     /// Returns false if the thread should exit.
     fn process_msg(&mut self,
                    msg: CoreResourceMsg,
-                   group: &ResourceGroup,
-                   control_sender: &CoreResourceThread) -> bool {
+                   resource_manager: &mut CoreResourceManager) -> bool {
         match msg {
             CoreResourceMsg::Load(load_data, consumer, id_sender) =>
-                self.resource_manager.load(load_data, consumer, id_sender, control_sender.clone(), group),
+                resource_manager.load(load_data, consumer, id_sender, self.control_sender.clone(), &self.resource_group),
             CoreResourceMsg::Fetch(init, sender) =>
-                self.resource_manager.fetch(init, sender, group),
+                resource_manager.fetch(init, sender, &self.resource_group),
             CoreResourceMsg::WebsocketConnect(connect, connect_data) =>
-                self.resource_manager.websocket_connect(connect, connect_data, group),
+                resource_manager.websocket_connect(connect, connect_data, &self.resource_group),
             CoreResourceMsg::SetCookiesForUrl(request, cookie_list, source) =>
-                self.resource_manager.set_cookies_for_url(request, cookie_list, source, group),
+                resource_manager.set_cookies_for_url(request, cookie_list, source, &self.resource_group),
             CoreResourceMsg::SetCookiesForUrlWithData(request, cookie, source) =>
-                self.resource_manager.set_cookies_for_url_with_data(request, cookie, source, group),
+                resource_manager.set_cookies_for_url_with_data(request, cookie, source, &self.resource_group),
             CoreResourceMsg::GetCookiesForUrl(url, consumer, source) => {
-                let mut cookie_jar = group.cookie_jar.write().unwrap();
+                let mut cookie_jar = self.resource_group.cookie_jar.write().unwrap();
                 consumer.send(cookie_jar.cookies_for_url(&url, source)).unwrap();
             }
             CoreResourceMsg::GetCookiesDataForUrl(url, consumer, source) => {
-                let mut cookie_jar = group.cookie_jar.write().unwrap();
+                let mut cookie_jar = self.resource_group.cookie_jar.write().unwrap();
                 let cookies = cookie_jar.cookies_data_for_url(&url, source).collect();
                 consumer.send(cookies).unwrap();
             }
             CoreResourceMsg::Cancel(res_id) => {
-                if let Some(cancel_sender) = self.resource_manager.cancel_load_map.get(&res_id) {
+                if let Some(cancel_sender) = resource_manager.cancel_load_map.get(&res_id) {
                     let _ = cancel_sender.send(());
                 }
-                self.resource_manager.cancel_load_map.remove(&res_id);
+                resource_manager.cancel_load_map.remove(&res_id);
             }
             CoreResourceMsg::Synchronize(sender) => {
                 let _ = sender.send(());
             }
             CoreResourceMsg::Exit(sender) => {
                 if let Some(ref config_dir) = opts::get().config_dir {
-                    match group.auth_cache.read() {
+                    match self.resource_group.auth_cache.read() {
                         Ok(auth_cache) => write_json_to_file(&*auth_cache, config_dir, "auth_cache.json"),
                         Err(_) => warn!("Error writing auth cache to disk"),
                     }
-                    match group.cookie_jar.read() {
+                    match self.resource_group.cookie_jar.read() {
                         Ok(jar) => write_json_to_file(&*jar, config_dir, "cookie_jar.json"),
                         Err(_) => warn!("Error writing cookie jar to disk"),
                     }
-                    match group.hsts_list.read() {
+                    match self.resource_group.hsts_list.read() {
                         Ok(hsts) => write_json_to_file(&*hsts, config_dir, "hsts_list.json"),
                         Err(_) => warn!("Error writing hsts list to disk"),
                     }
@@ -320,6 +365,7 @@ impl ResourceChannelManager {
         true
     }
 }
+
 
 pub fn read_json_from_file<T: Decodable>(data: &mut T, config_dir: &str, filename: &str) {
     let path = Path::new(config_dir).join(filename);
@@ -510,6 +556,7 @@ impl CoreResourceManager {
             id_sender: Option<IpcSender<ResourceId>>,
             resource_thread: CoreResourceThread,
             resource_grp: &ResourceGroup) {
+        println!("Load url {}", load_data.url);
         fn from_factory(factory: fn(LoadData, LoadConsumer, Arc<MIMEClassifier>, CancellationListener))
                         -> Box<FnBox(LoadData,
                                      LoadConsumer,
