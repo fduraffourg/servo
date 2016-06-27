@@ -217,12 +217,10 @@ pub fn new_core_resource_thread(user_agent: String,
             public: public,
             private: private,
         };
-        // channel_manager.start(public_setup_chan_clone,
-        //                       private_setup_chan_clone,
-        //                       public_setup_port,
-        //                       private_setup_port);
 
         let mut event_loop = mio::EventLoop::new().expect("Unable to create MIO event loop");
+        // Would be better to register an event with the underlying file descriptors of receivers,
+        // but they are not publicly exposed...
         //let fd_private_receiver = private_setup_port.os_receiver.consume_fd();
         event_loop.timeout_ms((), 100);
         event_loop.run(&mut channel_manager);
