@@ -276,6 +276,10 @@ pub enum CompositorEvent {
     TouchpadPressureEvent(Point2D<f32>, f32, TouchpadPressurePhase),
     /// A key was pressed.
     KeyEvent(Key, KeyState, KeyModifiers),
+    /// A character was received
+    // It should be CharacterEvent(char), but char doesn't seem to get properly
+    // sent throught IpcSender
+    CharacterEvent(u32),
 }
 
 /// Touchpad pressure phase for TouchpadPressureEvent.
@@ -545,6 +549,8 @@ pub enum ConstellationMsg {
     IsReadyToSaveImage(HashMap<PipelineId, Epoch>),
     /// Inform the constellation of a key event.
     KeyEvent(Key, KeyState, KeyModifiers),
+    /// Inform the constellation of a character event.
+    CharacterEvent(char),
     /// Request to load a page.
     LoadUrl(PipelineId, LoadData),
     /// Request to navigate a frame.

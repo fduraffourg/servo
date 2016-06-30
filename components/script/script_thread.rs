@@ -82,13 +82,14 @@ use script_layout_interface::message::{self, NewLayoutThreadInfo, ReflowQueryTyp
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptThreadEventCategory};
 use script_runtime::{ScriptPort, StackRootTLS, new_rt_and_cx, get_reports};
 use script_traits::CompositorEvent::{KeyEvent, MouseButtonEvent, MouseMoveEvent, ResizeEvent};
-use script_traits::CompositorEvent::{TouchEvent, TouchpadPressureEvent};
+use script_traits::CompositorEvent::{TouchEvent, TouchpadPressureEvent, CharacterEvent};
 use script_traits::{CompositorEvent, ConstellationControlMsg, EventResult};
 use script_traits::{InitialScriptState, MouseButton, MouseEventType, MozBrowserEvent};
 use script_traits::{NewLayoutInfo, ScriptMsg as ConstellationMsg};
 use script_traits::{ScriptThreadFactory, TimerEvent, TimerEventRequest, TimerSource};
 use script_traits::{TouchEventType, TouchId, UntrustedNodeAddress};
 use std::borrow::ToOwned;
+use std::char;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::option::Option;
@@ -1943,6 +1944,18 @@ impl ScriptThread {
                     None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
                 };
                 document.dispatch_key_event(key, state, modifiers, &self.constellation_chan);
+            }
+
+            CharacterEvent(code) => {
+                let character = match char::from_u32(code) {
+                    Some(c) => c,
+                    None => return,
+                };
+                let document = match self.root_browsing_context().find(pipeline_id) {
+                    Some(browsing_context) => browsing_context.active_document(),
+                    None => return warn!("Message sent to closed pipeline {}.", pipeline_id),
+                };
+                document.dispatch_character_event(character);
             }
         }
     }

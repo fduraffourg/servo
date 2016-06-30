@@ -1095,34 +1095,7 @@ impl Document {
                                           props.key_code);
         let event = keyevent.upcast::<Event>();
         event.fire(target);
-        let mut prevented = event.DefaultPrevented();
-
-        // https://w3c.github.io/uievents/#keys-cancelable-keys
-        if state != KeyState::Released && props.is_printable() && !prevented {
-            // https://w3c.github.io/uievents/#keypress-event-order
-            let event = KeyboardEvent::new(&self.window,
-                                           DOMString::from("keypress"),
-                                           true,
-                                           true,
-                                           Some(&self.window),
-                                           0,
-                                           Some(key),
-                                           DOMString::from(props.key_string),
-                                           DOMString::from(props.code),
-                                           props.location,
-                                           is_repeating,
-                                           is_composing,
-                                           ctrl,
-                                           alt,
-                                           shift,
-                                           meta,
-                                           props.char_code,
-                                           0);
-            let ev = event.upcast::<Event>();
-            ev.fire(target);
-            prevented = ev.DefaultPrevented();
-            // TODO: if keypress event is canceled, prevent firing input events
-        }
+        let prevented = event.DefaultPrevented();
 
         if !prevented {
             constellation.send(ConstellationMsg::SendKeyEvent(key, state, modifiers)).unwrap();
@@ -1159,6 +1132,40 @@ impl Document {
         self.window.reflow(ReflowGoal::ForDisplay,
                            ReflowQueryType::NoQuery,
                            ReflowReason::KeyEvent);
+    }
+
+    /// The entry point for all character received
+    pub fn dispatch_character_event(&self,
+                              character: char) {
+        let focused = self.get_focused_element();
+        let body = self.GetBody();
+
+        let target = match (&focused, &body) {
+            (&Some(ref focused), _) => focused.upcast(),
+            (&None, &Some(ref body)) => body.upcast(),
+            (&None, &None) => self.window.upcast(),
+        };
+
+        let event = KeyboardEvent::new(&self.window,
+                                       DOMString::from("keypress"),
+                                       true,
+                                       true,
+                                       Some(&self.window),
+                                       0,
+                                       None,
+                                       DOMString::from(character.to_string()),
+                                       DOMString::from("Unidentified".to_owned()),
+                                       0,
+                                       false,
+                                       false,
+                                       false,
+                                       false,
+                                       false,
+                                       false,
+                                       Some(character as u32),
+                                       0);
+        let ev = event.upcast::<Event>();
+        ev.fire(target);
     }
 
     // https://dom.spec.whatwg.org/#converting-nodes-into-a-node

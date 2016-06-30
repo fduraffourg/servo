@@ -77,6 +77,8 @@ pub enum WindowEvent {
     Quit,
     /// Sent when a key input state changes
     KeyEvent(Key, KeyState, KeyModifiers),
+    /// Sent when a character is received
+    CharacterEvent(char),
     /// Sent when Ctr+R/Apple+R is called to reload the current page.
     Reload,
 }
@@ -91,6 +93,7 @@ impl Debug for WindowEvent {
             WindowEvent::TouchpadPressure(..) => write!(f, "TouchpadPressure"),
             WindowEvent::Viewport(..) => write!(f, "Viewport"),
             WindowEvent::KeyEvent(..) => write!(f, "Key"),
+            WindowEvent::CharacterEvent(..) => write!(f, "Character"),
             WindowEvent::LoadUrl(..) => write!(f, "LoadUrl"),
             WindowEvent::MouseWindowEventClass(..) => write!(f, "Mouse"),
             WindowEvent::MouseWindowMoveEventClass(..) => write!(f, "MouseMove"),

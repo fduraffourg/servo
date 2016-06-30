@@ -579,6 +579,10 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 debug!("constellation got key event message");
                 self.handle_key_msg(key, state, modifiers);
             }
+            FromCompositorMsg::CharacterEvent(character) => {
+                debug!("constellation got character event message");
+                self.handle_character_msg(character);
+            }
             // Load a new page from a typed url
             // If there is already a pending page (self.pending_frames), it will not be overridden;
             // However, if the id is not encompassed by another change, it will be.
@@ -1421,6 +1425,28 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
             None => {
                 let event = ToCompositorMsg::KeyEvent(key, state, mods);
                 self.compositor_proxy.clone_compositor_proxy().send(event);
+            }
+        }
+    }
+
+    fn handle_character_msg(&mut self, character: char) {
+        // Send to the explicitly focused pipeline (if it exists), or the root
+        // frame's current pipeline. If neither exist, we don't fall back to sending to the
+        // compositor below as it only deals with Key event to map shortcuts.
+        let root_pipeline_id = self.root_frame_id
+            .and_then(|root_frame_id| self.frames.get(&root_frame_id))
+            .map(|root_frame| root_frame.current);
+        let pipeline_id = self.focus_pipeline_id.or(root_pipeline_id);
+
+        if let Some(pipeline_id) = pipeline_id {
+            let event = CompositorEvent::CharacterEvent(character as u32);
+            let msg = ConstellationControlMsg::SendEvent(pipeline_id, event);
+            let result = match self.pipelines.get(&pipeline_id) {
+                Some(pipeline) => pipeline.script_chan.send(msg),
+                None => return debug!("Pipeline {:?} got key event after closure.", pipeline_id),
+            };
+            if let Err(e) = result {
+                self.handle_send_error(pipeline_id, e);
             }
         }
     }

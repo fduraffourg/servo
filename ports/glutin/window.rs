@@ -233,6 +233,15 @@ impl Window {
 
     fn handle_window_event(&self, event: glutin::Event) -> bool {
         match event {
+            Event::ReceivedCharacter(character) => {
+                // Ignore control characters that are handled by other functions.
+                // For example DEL will trigger a delete function but letting the character
+                // pass will print a (probably) strange symbol on the input element.
+                let code = character as u32;
+                if !(code < 32 || ( 127 <= code && code <= 160)) {
+                    self.event_queue.borrow_mut().push(WindowEvent::CharacterEvent(character));
+                }
+            }
             Event::KeyboardInput(element_state, _scan_code, Some(virtual_key_code)) => {
                 match virtual_key_code {
                     VirtualKeyCode::LControl => self.toggle_modifier(LEFT_CONTROL),

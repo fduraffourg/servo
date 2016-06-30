@@ -953,13 +953,17 @@ impl VirtualMethods for HTMLInputElement {
             //TODO: set the editing position for text inputs
 
             document_from_node(self).request_focus(self.upcast());
-        } else if event.type_() == atom!("keydown") && !event.DefaultPrevented() &&
+        } else if !event.DefaultPrevented() &&
             (self.input_type.get() == InputType::InputText ||
              self.input_type.get() == InputType::InputPassword) {
                 if let Some(keyevent) = event.downcast::<KeyboardEvent>() {
                     // This can't be inlined, as holding on to textinput.borrow_mut()
                     // during self.implicit_submission will cause a panic.
-                    let action = self.textinput.borrow_mut().handle_keydown(keyevent);
+                    let action = match event.type_() {
+                        atom!("keydown") => self.textinput.borrow_mut().handle_keydown(keyevent),
+                        atom!("keypress") => self.textinput.borrow_mut().handle_keypress(keyevent),
+                        _ => Nothing,
+                    };
                     match action {
                         TriggerDefaultAction => {
                             self.implicit_submission(keyevent.CtrlKey(),

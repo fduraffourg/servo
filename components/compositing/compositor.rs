@@ -1334,6 +1334,10 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                 self.on_key_event(key, state, modifiers);
             }
 
+            WindowEvent::CharacterEvent(character) => {
+                self.on_character_event(character);
+            }
+
             WindowEvent::Quit => {
                 if self.shutdown_state == ShutdownState::NotShuttingDown {
                     debug!("Shutting down the constellation for WindowEvent::Quit");
@@ -1844,6 +1848,13 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         let msg = ConstellationMsg::KeyEvent(key, state, modifiers);
         if let Err(e) = self.constellation_chan.send(msg) {
             warn!("Sending key event to constellation failed ({}).", e);
+        }
+    }
+
+    fn on_character_event(&self, character: char) {
+        let msg = ConstellationMsg::CharacterEvent(character);
+        if let Err(e) = self.constellation_chan.send(msg) {
+            warn!("Sending character event to constellation failed ({}).", e);
         }
     }
 

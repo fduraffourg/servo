@@ -6,7 +6,8 @@
 
 use clipboard_provider::ClipboardProvider;
 use dom::bindings::str::DOMString;
-use dom::keyboardevent::{KeyboardEvent, key_value};
+use dom::bindings::codegen::Bindings::KeyboardEventBinding::KeyboardEventMethods;
+use dom::keyboardevent::KeyboardEvent;
 use msg::constellation_msg::{ALT, CONTROL, SHIFT, SUPER};
 use msg::constellation_msg::{Key, KeyModifiers};
 use std::borrow::ToOwned;
@@ -118,24 +119,6 @@ fn is_control_key(mods: KeyModifiers) -> bool {
 #[cfg(not(target_os = "macos"))]
 fn is_control_key(mods: KeyModifiers) -> bool {
     mods.contains(CONTROL) && !mods.contains(SUPER | ALT)
-}
-
-fn is_printable_key(key: Key) -> bool {
-    match key {
-        Key::Space | Key::Apostrophe | Key::Comma | Key::Minus |
-        Key::Period | Key::Slash | Key::GraveAccent | Key::Num0 |
-        Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 |
-        Key::Num6 | Key::Num7 | Key::Num8 | Key::Num9 | Key::Semicolon |
-        Key::Equal | Key::A | Key::B | Key::C | Key::D | Key::E | Key::F |
-        Key::G | Key::H | Key::I | Key::J | Key::K | Key::L | Key::M | Key::N |
-        Key::O | Key::P | Key::Q | Key::R | Key::S | Key::T | Key::U | Key::V |
-        Key::W | Key::X | Key::Y | Key::Z | Key::LeftBracket | Key::Backslash |
-        Key::RightBracket | Key::Kp0 | Key::Kp1 | Key::Kp2 | Key::Kp3 |
-        Key::Kp4 | Key::Kp5 | Key::Kp6 | Key::Kp7 | Key::Kp8 | Key::Kp9 |
-        Key::KpDecimal | Key::KpDivide | Key::KpMultiply | Key::KpSubtract |
-        Key::KpAdd | Key::KpEqual => true,
-        _ => false,
-    }
 }
 
 /// The length in bytes of the first n characters in a UTF-8 string.
@@ -491,6 +474,12 @@ impl<T: ClipboardProvider> TextInput<T> {
             KeyReaction::Nothing
         }
     }
+
+    pub fn handle_keypress(&mut self, event: &KeyboardEvent) -> KeyReaction {
+        self.insert_string(event.Key());
+        KeyReaction::DispatchInput
+    }
+
     pub fn handle_keydown_aux(&mut self, key: Key, mods: KeyModifiers) -> KeyReaction {
         let maybe_select = if mods.contains(SHIFT) { Selection::Selected } else { Selection::NotSelected };
         match key {
@@ -509,14 +498,6 @@ impl<T: ClipboardProvider> TextInput<T> {
                 self.insert_string(contents);
                 KeyReaction::DispatchInput
             },
-            _ if is_printable_key(key) => {
-                self.insert_string(key_value(key, mods));
-                KeyReaction::DispatchInput
-            }
-            Key::Space => {
-                self.insert_char(' ');
-                KeyReaction::DispatchInput
-            }
             Key::Delete => {
                 self.delete_char(Direction::Forward);
                 KeyReaction::DispatchInput
